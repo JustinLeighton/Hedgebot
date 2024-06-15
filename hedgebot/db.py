@@ -1,7 +1,7 @@
 import sqlite3
 import os
 import pandas as pd
-from typing import Optional, Tuple, Any
+from typing import Optional, Any
 
 
 class SQLiteManager:
@@ -100,3 +100,6 @@ class SQLiteManager:
             print(f"Error deleting rows: {e}")
         finally:
             self.disconnect()
+
+    def upsert_record(self, table_name: str, values: list[Any]) -> None:
+        pass

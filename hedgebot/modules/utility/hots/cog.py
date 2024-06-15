@@ -2,7 +2,9 @@ from discord.ext import commands
 import discord
 
 from db import SQLiteManager
-from modules.utility.hots.sql import get_user_by_id, get_roster_by_user, put_user
+from tools.embed import newembed
+from modules.utility.hots.sql import get_user_by_id, get_roster_by_user, put_user, get_roles
+from modules.utility.hots.etl import run_hots_etl
 
 
 class Commands(commands.Cog):
@@ -15,6 +17,7 @@ class Commands(commands.Cog):
         self.db.table(table_name="HEROES", columns={"HERO": "TEXT", "STUB": "TEXT", "ROLE_ID": "INT"})
         self.db.table(table_name="ROLES", columns={"ROLE": "TEXT", "ARGUMENT": "TEXT"})
         self.db.table(table_name="ROSTER", columns={"USER_ID": "INT", "HERO_ID": "INT"})
+        self.db.table(table_name="TEAM", columns={"USER_ID": "INT", "HERO_ID": "INT"})
         self.db.table(
             table_name="COMPOSITON",
             columns={"HERO_ID": "INT", "COMPOSITION_ID": "INT", "GAMES": "INT", "SCORE": "REAL"},
@@ -26,16 +29,22 @@ class Commands(commands.Cog):
         if ctx.invoked_subcommand is None:
             await ctx.send_help(self.hots)
         else:
-            data = self.db.execute_query(get_user_by_id(ctx.message.author.id))
+            query = get_user_by_id(ctx.message.author.id)
+            data = self.db.execute_query(query)
             if data is None:
-                put_user(ctx.message.author.name, ctx.message.author.id)
+                query = put_user(ctx.message.author.name, ctx.message.author.id)
+                self.db.execute_query(query)
 
     @hots.command(name="Roles", aliases=["roles"])
     async def roles(self, ctx: commands.Context):  # type: ignore
         """Outputs a list of the hero roles for use as filters"""
-        await ctx.send(
-            f"""Ranged Assassin | -r \nMelee Assassin | -m \nTank | -t \nBrusier | -b \nHealer | -h \nSupport | -s"""
-        )
+        query = get_roles()
+        data = self.db.execute_query(query)
+        if data is not None:
+            embed = newembed()
+            embed.add_field(name="Role", value="\n".join(list(data["ROLE"])), inline=True)
+            embed.add_field(name="Stub", value="\n".join(list(data["STUB"])), inline=True)
+            await ctx.send(embed=embed)
 
     @hots.command(name="Roster", aliases=["roster"])
     @discord.app_commands.describe(role="Date in YYYY-MM-DD format")
@@ -46,10 +55,15 @@ class Commands(commands.Cog):
         -----------
         role: str
             Optional role filter. See 'Roles' command for more information"""
-        data = self.db.execute_query(get_roster_by_user(ctx.message.author.id))
-        if data is not None:
-            hero_list = data["HERO"].to_list()
-            await ctx.send(f"{', '.join(hero_list)}")
+        query = get_roster_by_user(ctx.message.author.id)
+        data = self.db.execute_query(query)
+        roles = self.db.execute_query("SELECT ROLE FROM ROLES")
+        if data is not None and roles is not None:
+            roles = list(roles["ROLE"])
+            embed = newembed()
+            for role in roles:
+                embed.add_field(name=role, value=", ".join(list(data[data["ROLE"] == role]["HERO"])))
+            await ctx.send(embed=embed)
             return
         await ctx.send(
             f"Hello {ctx.message.author.name}! You do not currently have a Heroes of the Storm roster entered. Use 'Add' to add heroes to your roster"
@@ -174,5 +188,5 @@ class Commands(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def etl(self, ctx: commands.Context):  # type: ignore
         """Admin command; Run ETL process to update hero pairing values"""
-        author = str(ctx.message.author.mention)
-        await ctx.send(f"Hello, {author}!")
+        run_hots_etl()
+        await ctx.send(f"HotS ETL finished!")
