@@ -1,6 +1,8 @@
+from datetime import datetime, timedelta
+import random
+
 from discord.ext import commands
 import discord
-
 from pandas import DataFrame
 
 from db import SQLiteManager
@@ -12,10 +14,18 @@ from modules.utility.hots.sql import (
     get_roles,
     get_roster_by_userid_and_heroid,
     get_heroes,
+    get_team,
+    get_team_by_userid,
+    get_composition_stats,
     post_user,
     post_roster,
+    post_team,
+    put_team,
+    delete_team,
+    delete_roster,
 )
 from modules.utility.hots.etl import run_hots_etl
+from modules.utility.hots.hero_selection import HERO_SELECTION_MESSAGES
 
 
 class Commands(commands.Cog):
@@ -24,15 +34,18 @@ class Commands(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = SQLiteManager("hedgebot/modules/utility/hots/db.sqlite3")
-        self.db.table(table_name="USERS", columns={"USERNAME": "STR", "DISCORD_ID": "INT"})
+        self.db.table(table_name="USERS", columns={"USERNAME": "STR"})
         self.db.table(table_name="HEROES", columns={"HERO": "TEXT", "STUB": "TEXT", "ROLE_ID": "INT"})
         self.db.table(table_name="ROLES", columns={"ROLE": "TEXT", "ARGUMENT": "TEXT"})
         self.db.table(table_name="ROSTER", columns={"USER_ID": "INT", "HERO_ID": "INT"})
         self.db.table(table_name="TEAM", columns={"USER_ID": "INT", "HERO_ID": "INT"})
         self.db.table(
-            table_name="COMPOSITON",
+            table_name="COMPOSITION",
             columns={"HERO_ID": "INT", "COMPOSITION_ID": "INT", "GAMES": "INT", "SCORE": "REAL"},
         )
+
+        self.team_timestamp: datetime = datetime.now()
+        self.team_time_minutes: int = 10
 
     @commands.group(name="Hots", aliases=["HOTS", "HotS", "hots"])
     async def hots(self, ctx: commands.Context) -> None:  # type: ignore
@@ -43,10 +56,10 @@ class Commands(commands.Cog):
             query = get_user_by_id(ctx.message.author.id)
             data = self.db.execute_query(query)
             if data is None:
-                query = post_user(ctx.message.author.name, ctx.message.author.id)
+                query = post_user(ctx.message.author.id, ctx.message.author.name.title())
                 self.db.execute_query(query)
 
-    @hots.command(name="Roles", aliases=["roles"])
+    @hots.command(name="Roles", aliases=["roles", "Role", "role"])
     async def roles(self, ctx: commands.Context):  # type: ignore
         """Outputs a list of the hero roles for use as filters"""
         query = get_roles()
@@ -65,11 +78,11 @@ class Commands(commands.Cog):
         Parameters
         -----------
         role: str
-            Optional role filter. See 'Roles' command for more information"""
+            stubs (see 'Role')."""
         query = get_roster_by_user(ctx.message.author.id)
         data = self.db.execute_query(query)
         if data is not None:
-            embed = await self.get_hero_table_embed(data, f"{ctx.message.author.name.title()}'s Roster")
+            embed = self.get_hero_table_embed(data, f"{ctx.message.author.name.title()}'s Roster")
             await ctx.send(embed=embed)
             return
         await ctx.send(
@@ -77,71 +90,29 @@ class Commands(commands.Cog):
         )
 
     @hots.command(name="Draft", aliases=["draft"])
-    async def draft(self, ctx: commands.Context, role: str):  # type: ignore
-        """Draft a hero from the user's roster.
+    async def draft(self, ctx: commands.Context, *role: str):  # type: ignore
+        """Draft a hero from the user's roster using weighted-random selection.
 
         Parameters
         -----------
         role: str
-            Optional role filter, e.g. "Healer"
-        """
-        author = str(ctx.message.author.mention)
-        await ctx.send(f"Hello, {author}, {role}!")
+            stubs (see 'Role'), '-o' for optimal, '-x' for completely random."""
+        self.check_team_timer()
 
-    #     # Get data
-    #     author = str(ctx.message.author.mention)
-    #     roster = self.get_roster(author, role)
-    #     team = self.get_team()
-    #     team = dict((k, str(team[k])) for k in team if k != author)
+        # Validate role filters, and check for optimal flag here
+        # ~~~
+        # ~~~
+        # ~~~
 
-    #     # Check for records
-    #     output = "Unable to select hero"
-    #     if roster.shape[0] > 0:
+        # Get data
+        discord_id, username = ctx.message.author.id, ctx.message.author.name.title()
+        query = get_composition_stats(discord_id, role)
+        data = self.db.execute_query(query)
 
-    #         # Import pairings and roles
-    #         con = self.get_db()
-    #         team_heroes = ""
-    #         if len(team) > 1:
-    #             team_heroes = f"""
-    #             and Duo not in ('{"','".join(list(team.values())[1:])}')
-    #             and Hero in ('{"','".join(list(team.values())[1:])}')"""
-    #         pairings = pd.read_sql_query(
-    #             f"""
-    #         select Hero, Duo, Games, Winrate
-    #         from Pairings
-    #         where Duo in ('{"','".join(roster['Hero'].tolist())}'){team_heroes}""",
-    #             con,
-    #         )
-    #         role_keys = pd.read_sql_query("select Hero, Role from Roster", con)
-    #         con.close()
-
-    #         # Adjust win-rate by sample size
-
-    #         # Represented roles
-    #         represented_roles = role_keys[role_keys["Hero"].isin(list(team.values()))]["Role"].unique()
-    #         represented_roles = pd.DataFrame(represented_roles, columns=["Role"])
-    #         represented_roles["role_factor"] = 0.5
-
-    #         # Calculate weights
-    #         weights = pd.merge(pairings, role_keys.rename({"Hero": "Duo"}, axis=1), on="Duo")
-    #         weights = pd.merge(weights, represented_roles, on="Role", how="left").fillna(1)
-    #         weights["factor"] = weights["Winrate"] * weights["role_factor"]
-    #         weights = weights.groupby("Duo")["factor"].mean().to_frame("Weight").reset_index()
-    #         weights["Weight"] = weights["Weight"] ** 2 * 100 // 1
-
-    #         # Output hero selection
-    #         if "optimal" in "".join(role).lower():
-    #             output = weights.sort_values(["Weight"], ascending=False)["Duo"].iloc[0]
-    #         elif "random" in "".join(role).lower():
-    #             output = weights.sample(weights=weights.groupby("Duo")["Weight"].transform("sum"))["Duo"].iloc[0]
-    #         else:
-    #             output = weights.sample(weights=weights.groupby("Duo")["Weight"].transform("sum"))["Duo"].iloc[0]
-
-    #         # Update team file
-    #         self.set_team(team, author, output)
-
-    #     # Output message
-    #     await ctx.send(output)
+        # Make selection
+        if data is not None:
+            selection = data[["HERO_ID", "HERO"]].sample().iloc[0]  # sample has a weights argument
+            await self.post_hero_selection(ctx, discord_id, username, selection["HERO_ID"], selection["HERO"])
 
     @hots.command(name="Add", aliases=["add"])
     async def add(self, ctx: commands.Context, *hero):  # type: ignore
@@ -174,8 +145,18 @@ class Commands(commands.Cog):
         hero: str
             Name of the hero to add to the users roster
         """
-        author = str(ctx.message.author.mention)
-        await ctx.send(f"Hello, {author}!")
+        hero_name, hero_id = await self.fuzzy_match_hero_name(ctx, " ".join(hero))
+        if hero_id > -1:
+            query = get_roster_by_userid_and_heroid(ctx.message.author.id, hero_id)
+            data = self.db.execute_query(query)
+
+            if data is None:
+                await ctx.send(f"You don't have {hero_name} in your roster!")
+                return
+
+            query = delete_roster(ctx.message.author.id, hero_id)
+            data = self.db.execute_query(query)
+            await ctx.send(f"Removed {hero_name} to your roster!")
 
     @hots.command(name="Select", aliases=["select"])
     async def select(self, ctx: commands.Context, *hero):  # type: ignore
@@ -186,14 +167,26 @@ class Commands(commands.Cog):
         hero: str
             Name of the hero to add to the users roster
         """
-        author = str(ctx.message.author.mention)
-        await ctx.send(f"Hello, {author}!")
+        self.check_team_timer()
+        hero_name, hero_id = await self.fuzzy_match_hero_name(ctx, " ".join(hero))
+        discord_id, username = ctx.message.author.id, ctx.message.author.name.title()
+        if hero_id > -1:
+            await self.post_hero_selection(ctx, discord_id, username, hero_id, hero_name)
 
     @hots.command(name="Team", aliases=["team"])
     async def team(self, ctx: commands.Context):  # type: ignore
         """Displays the current team"""
-        author = str(ctx.message.author.mention)
-        await ctx.send(f"Hello, {author}!")
+        self.check_team_timer()
+        query = get_team()
+        data = self.db.execute_query(query)
+        if data is not None:
+            embed = newembed()
+            embed.add_field(name="Player", value="\n".join(list(data["USERNAME"])))
+            embed.add_field(name="Hero", value="\n".join(list(data["HERO"])))
+            embed.add_field(name="Role", value="\n".join(list(data["ROLE"])))
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send("No current team found")
 
     @hots.command(name="Hero", aliases=["hero", "Heroes", "heroes"])
     async def hero(self, ctx: commands.Context):  # type: ignore
@@ -201,7 +194,7 @@ class Commands(commands.Cog):
         query = get_heroes()
         data = self.db.execute_query(query)
         if data is not None:
-            embed = await self.get_hero_table_embed(data, "Available Heroes")
+            embed = self.get_hero_table_embed(data, "Available Heroes")
             await ctx.send(embed=embed)
             return
         await ctx.send(f"Something went wrong; No heroes available...")
@@ -210,16 +203,15 @@ class Commands(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def clear(self, ctx: commands.Context):  # type: ignore
         """Admin command; Clears current team"""
-        author = str(ctx.message.author.mention)
-        await ctx.send(f"Hello, {author}!")
+        query = delete_team()
+        self.db.execute_query(query)
+        await ctx.send(f"Team cleared!")
 
-    # Backup command - Admin only
     @hots.command(hidden=True)
     @commands.has_permissions(administrator=True)
     async def backup(self, ctx: commands.Context):  # type: ignore
         """Admin command; Creates database backup"""
-        author = str(ctx.message.author.mention)
-        await ctx.send(f"Hello, {author}!")
+        await ctx.send(f"501: Not implemented")
 
     @hots.command(hidden=True)
     @commands.has_permissions(administrator=True)
@@ -233,9 +225,19 @@ class Commands(commands.Cog):
         """Admin command; Run ETL process to update hero pairing values"""
         hero = " ".join(hero)
         match, id = await self.fuzzy_match_hero_name(ctx, hero)
-        await ctx.send(f"{hero} matched to {match} with ID {id}")
+        if id > -1:
+            await ctx.send(f"{hero} matched to {match} with ID {id}")
 
-    async def get_hero_table_embed(self, data: DataFrame, title: str) -> discord.Embed:
+    def check_team_timer(self):
+        """Checks if enough time has passed to start a new team"""
+        current_time = datetime.now()
+        time_difference = current_time - self.team_timestamp
+        if time_difference >= timedelta(minutes=5):
+            query = delete_team()
+            self.db.execute_query(query)
+        self.team_timestamp = datetime.now()
+
+    def get_hero_table_embed(self, data: DataFrame, title: str) -> discord.Embed:
         """
         Generates a Discord embed displaying heroes categorized by roles.
 
@@ -254,6 +256,18 @@ class Commands(commands.Cog):
                 embed.add_field(name=role, value=", ".join(list(data[data["ROLE"] == role]["HERO"])))
         return embed
 
+    async def post_hero_selection(self, ctx: commands.Context, discord_id: int, username: str, hero_id: int, hero_name: str):  # type: ignore
+        query = get_team_by_userid(discord_id)
+        data = self.db.execute_query(query)
+        query = post_team(discord_id, hero_id) if data is None else put_team(discord_id, hero_id)
+        self.db.execute_query(query)
+        message = self.get_hero_selection_message(ctx.message.author.name, hero_name)
+        await ctx.send(message)
+
+    def get_hero_selection_message(self, username: str, heroname: str) -> str:
+        message_template = random.choice(HERO_SELECTION_MESSAGES)
+        return message_template.format(username=username, heroname=heroname)
+
     async def fuzzy_match_hero_name(self, ctx: commands.Context, input: str, threshold: float = 0.5) -> tuple[str, int]:  # type: ignore
         """
         Performs a fuzzy matching of input against a list of hero names.
@@ -270,19 +284,21 @@ class Commands(commands.Cog):
         query = get_heroes()
         data = self.db.execute_query(query)
         while data is not None:
+
             input = sanitize_string(input)
             heroes = [sanitize_string(hero) for hero in list(data["HERO"])]
             match, best = "", 0
 
             for hero in heroes:
                 score = cosine_similarity_ngrams(hero, input)
-                print(hero, score)
                 if score > best:
                     match, best = hero, score
 
-            print(match, best)
+            try:
+                idx = heroes.index(match)
+            except Exception:
+                break
 
-            idx = heroes.index(match)
             id = safe_cast_to_int(data["ID"].iloc[idx])
             hero_match = data["HERO"].iloc[idx]
             if id == -1 or best < threshold:
@@ -290,5 +306,5 @@ class Commands(commands.Cog):
 
             return hero_match, id
 
-        await ctx.send(f"{input} didn't match to any available heroes... Use 'Hero' to see list of available heroes.")
+        await ctx.send(f"'{input}' didn't match to any available heroes... Use 'Hero' to see list of available heroes.")
         return "", -1
