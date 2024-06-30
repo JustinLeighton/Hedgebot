@@ -13,8 +13,6 @@ coverage.xml
 poetry.lock
 htmlcov*
 
-poetry.lock
-
 old/
 test*.csv
 *load.txt

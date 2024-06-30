@@ -1,8 +1,8 @@
-def get_user_by_id(discord_id: int) -> str:
+def select_user_by_id(discord_id: int) -> str:
     return f"""SELECT * FROM USERS WHERE ID = {discord_id}"""
 
 
-def get_roster_by_user(discord_id: int) -> str:
+def select_roster_by_user(discord_id: int) -> str:
     return f"""SELECT ROSTER.HERO_ID, HEROES.HERO, ROLES.ROLE
             FROM ROSTER
             JOIN USERS ON ROSTER.USER_ID = USERS.ID
@@ -12,24 +12,24 @@ def get_roster_by_user(discord_id: int) -> str:
             ORDER BY HERO ASC"""
 
 
-def get_roles() -> str:
+def select_roles() -> str:
     return "SELECT ROLE, STUB FROM ROLES"
 
 
-def get_heroes() -> str:
+def select_heroes() -> str:
     return """SELECT HEROES.ID, HEROES.HERO, ROLES.ROLE
             FROM HEROES
             JOIN ROLES ON HEROES.ROLE_ID = ROLES.ID"""
 
 
-def get_roster_by_userid_and_heroid(discord_id: int, hero_id: int) -> str:
+def select_roster_by_userid_and_heroid(discord_id: int, hero_id: int) -> str:
     return f"""SELECT HERO_ID
             FROM ROSTER
             WHERE USER_ID = {discord_id} 
             AND HERO_ID = {hero_id}"""
 
 
-def get_team() -> str:
+def select_team() -> str:
     return """SELECT TEAM.USER_ID, USERS.USERNAME, TEAM.HERO_ID, HEROES.HERO, ROLES.ROLE, HEROES.ROLE_ID
             FROM TEAM
             JOIN USERS ON TEAM.USER_ID = USERS.ID
@@ -37,11 +37,11 @@ def get_team() -> str:
             JOIN ROLES ON HEROES.ROLE_ID = ROLES.ID"""
 
 
-def get_team_by_userid(discord_id: int) -> str:
+def select_team_by_userid(discord_id: int) -> str:
     return f"""SELECT HERO_ID FROM TEAM WHERE USER_ID = {discord_id}"""
 
 
-def get_composition_stats(discord_id: int, role_stubs: tuple[str, ...]) -> str:
+def select_composition_stats(discord_id: int, role_stubs: tuple[str, ...]) -> str:
     query = f"""WITH ROLECOUNT AS (
                 SELECT ROLES.ID AS ROLE_ID, COUNT(TEAM.HERO_ID) AS ROLE_N
                 FROM ROLES
@@ -75,22 +75,22 @@ def get_composition_stats(discord_id: int, role_stubs: tuple[str, ...]) -> str:
     return query
 
 
-def post_user(discord_id: int, username: str) -> str:
+def insert_user(discord_id: int, username: str) -> str:
     return f"""INSERT INTO USERS (ID, USERNAME)
             VALUES ({discord_id}, '{username}')"""
 
 
-def post_team(discord_id: int, hero_id: int) -> str:
+def insert_team(discord_id: int, hero_id: int) -> str:
     return f"""INSERT INTO TEAM (USER_ID, HERO_ID)
             VALUES ({discord_id}, {hero_id})"""
 
 
-def post_roster(discord_id: int, hero_id: int) -> str:
+def insert_roster(discord_id: int, hero_id: int) -> str:
     return f"""INSERT INTO ROSTER (USER_ID, HERO_ID)
             VALUES ({discord_id}, {hero_id})"""
 
 
-def put_team(discord_id: int, hero_id: int) -> str:
+def update_team(discord_id: int, hero_id: int) -> str:
     return f"""UPDATE TEAM 
             SET HERO_ID = {hero_id} 
             WHERE USER_ID = {discord_id}"""

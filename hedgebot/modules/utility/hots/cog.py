@@ -9,23 +9,23 @@ from db import SQLiteManager
 from tools.utils import cosine_similarity_ngrams, sanitize_string, safe_cast_to_int
 from tools.embed import newembed
 from modules.utility.hots.sql import (
-    get_user_by_id,
-    get_roster_by_user,
-    get_roles,
-    get_roster_by_userid_and_heroid,
-    get_heroes,
-    get_team,
-    get_team_by_userid,
-    get_composition_stats,
-    post_user,
-    post_roster,
-    post_team,
-    put_team,
+    select_user_by_id,
+    select_roster_by_user,
+    select_roles,
+    select_roster_by_userid_and_heroid,
+    select_heroes,
+    select_team,
+    select_team_by_userid,
+    select_composition_stats,
+    insert_user,
+    insert_roster,
+    insert_team,
+    update_team,
     delete_team,
     delete_roster,
 )
 from modules.utility.hots.etl import run_hots_etl
-from modules.utility.hots.hero_selection import HERO_SELECTION_MESSAGES
+from modules.utility.hots.data.hero_selection import HERO_SELECTION_MESSAGES
 
 
 class Commands(commands.Cog):
@@ -53,16 +53,16 @@ class Commands(commands.Cog):
         if ctx.invoked_subcommand is None:
             await ctx.send_help(self.hots)
         else:
-            query = get_user_by_id(ctx.message.author.id)
+            query = select_user_by_id(ctx.message.author.id)
             data = self.db.execute_query(query)
             if data is None:
-                query = post_user(ctx.message.author.id, ctx.message.author.name.title())
+                query = insert_user(ctx.message.author.id, ctx.message.author.name.title())
                 self.db.execute_query(query)
 
     @hots.command(name="Roles", aliases=["roles", "Role", "role"])
     async def roles(self, ctx: commands.Context):  # type: ignore
         """Outputs a list of the hero roles for use as filters"""
-        query = get_roles()
+        query = select_roles()
         data = self.db.execute_query(query)
         if data is not None:
             embed = newembed()
@@ -71,7 +71,6 @@ class Commands(commands.Cog):
             await ctx.send(embed=embed)
 
     @hots.command(name="Roster", aliases=["roster"])
-    @discord.app_commands.describe(role="Date in YYYY-MM-DD format")
     async def roster(self, ctx: commands.Context, *, role: str = ""):  # type: ignore
         """Outputs a list of the heroes in your roster
 
@@ -79,7 +78,7 @@ class Commands(commands.Cog):
         -----------
         role: str
             stubs (see 'Role')."""
-        query = get_roster_by_user(ctx.message.author.id)
+        query = select_roster_by_user(ctx.message.author.id)
         data = self.db.execute_query(query)
         if data is not None:
             embed = self.get_hero_table_embed(data, f"{ctx.message.author.name.title()}'s Roster")
@@ -106,7 +105,7 @@ class Commands(commands.Cog):
 
         # Get data
         discord_id, username = ctx.message.author.id, ctx.message.author.name.title()
-        query = get_composition_stats(discord_id, role)
+        query = select_composition_stats(discord_id, role)
         data = self.db.execute_query(query)
 
         # Make selection
@@ -125,14 +124,14 @@ class Commands(commands.Cog):
         """
         hero_name, hero_id = await self.fuzzy_match_hero_name(ctx, " ".join(hero))
         if hero_id > -1:
-            query = get_roster_by_userid_and_heroid(ctx.message.author.id, hero_id)
+            query = select_roster_by_userid_and_heroid(ctx.message.author.id, hero_id)
             data = self.db.execute_query(query)
 
             if data is not None:
                 await ctx.send(f"Already have {hero_name} in your roster!")
                 return
 
-            query = post_roster(ctx.message.author.id, hero_id)
+            query = insert_roster(ctx.message.author.id, hero_id)
             data = self.db.execute_query(query)
             await ctx.send(f"Added {hero_name} to your roster!")
 
@@ -147,7 +146,7 @@ class Commands(commands.Cog):
         """
         hero_name, hero_id = await self.fuzzy_match_hero_name(ctx, " ".join(hero))
         if hero_id > -1:
-            query = get_roster_by_userid_and_heroid(ctx.message.author.id, hero_id)
+            query = select_roster_by_userid_and_heroid(ctx.message.author.id, hero_id)
             data = self.db.execute_query(query)
 
             if data is None:
@@ -177,7 +176,7 @@ class Commands(commands.Cog):
     async def team(self, ctx: commands.Context):  # type: ignore
         """Displays the current team"""
         self.check_team_timer()
-        query = get_team()
+        query = select_team()
         data = self.db.execute_query(query)
         if data is not None:
             embed = newembed()
@@ -191,7 +190,7 @@ class Commands(commands.Cog):
     @hots.command(name="Hero", aliases=["hero", "Heroes", "heroes"])
     async def hero(self, ctx: commands.Context):  # type: ignore
         """Displays all available heroes"""
-        query = get_heroes()
+        query = select_heroes()
         data = self.db.execute_query(query)
         if data is not None:
             embed = self.get_hero_table_embed(data, "Available Heroes")
@@ -257,9 +256,9 @@ class Commands(commands.Cog):
         return embed
 
     async def post_hero_selection(self, ctx: commands.Context, discord_id: int, username: str, hero_id: int, hero_name: str):  # type: ignore
-        query = get_team_by_userid(discord_id)
+        query = select_team_by_userid(discord_id)
         data = self.db.execute_query(query)
-        query = post_team(discord_id, hero_id) if data is None else put_team(discord_id, hero_id)
+        query = insert_team(discord_id, hero_id) if data is None else update_team(discord_id, hero_id)
         self.db.execute_query(query)
         message = self.get_hero_selection_message(ctx.message.author.name, hero_name)
         await ctx.send(message)
@@ -281,7 +280,7 @@ class Commands(commands.Cog):
             tuple[str, int]: A tuple containing the matched hero name and its ID,
                             or an empty string and -1 if no match is found.
         """
-        query = get_heroes()
+        query = select_heroes()
         data = self.db.execute_query(query)
         while data is not None:
 
